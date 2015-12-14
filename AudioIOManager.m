@@ -401,6 +401,18 @@ static OSStatus	performRender (void                         *inRefCon,
     return YES;
 }
 
+- (void)dealloc
+{
+    /*---------------------------------------------------------------------*
+     * Be a good citizen, remove any dangling observers when we depart.
+     *--------------------------------------------------------------------*/
+    NSNotificationCenter *notificationCenter = [NSNotificationCenter defaultCenter];
+    [notificationCenter removeObserver:self];
+    
+    AVAudioSession *sessionInstance = [AVAudioSession sharedInstance];
+    [sessionInstance removeObserver:self forKeyPath:@"outputVolume"];
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 #pragma mark - Key-value observation
 ////////////////////////////////////////////////////////////////////////////////
