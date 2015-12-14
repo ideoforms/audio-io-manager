@@ -33,7 +33,7 @@ struct CallbackData
 {
     AudioUnit               audioIOUnit;
     BOOL*                   audioChainIsBeingReconstructed;
-    audio_callback_t        callback;
+    audio_data_callback_t        callback;
 } cd;
 
 
@@ -79,7 +79,8 @@ static OSStatus	performRender (void                         *inRefCon,
 /**-----------------------------------------------------------------------------
  * Pointer to the C function called when samples have been read.
  *----------------------------------------------------------------------------*/
-@property (assign) audio_callback_t callback;
+@property (assign) audio_data_callback_t callback;
+@property (assign) audio_volume_change_callback_t volumeBlock;
 
 @property (nonatomic, assign) AudioUnit audioIOUnit;
 @property (nonatomic, assign) BOOL audioChainIsBeingReconstructed;
@@ -95,7 +96,7 @@ static OSStatus	performRender (void                         *inRefCon,
 #pragma mark - Creation/deletion
 ////////////////////////////////////////////////////////////////////////////////
 
-- (id)initWithCallback:(audio_callback_t)callback
+- (id)initWithCallback:(audio_data_callback_t)callback
 {
     self = [super init];
     if (!self) return nil;
@@ -103,6 +104,7 @@ static OSStatus	performRender (void                         *inRefCon,
     NSLog(@"**** RUNNING PROTOTYPE AUDIO DRIVER ****\n");
     
     self.callback = callback;
+    self.volumeBlock = NULL;
     self.isInitialised = [self setupAudioChain];
 
     return self;
@@ -408,7 +410,8 @@ static OSStatus	performRender (void                         *inRefCon,
     
     if ([keyPath isEqual:@"outputVolume"])
     {
-        NSLog(@"volume changed: %f", [[AVAudioSession sharedInstance] outputVolume]);
+        if (self.volumeBlock)
+            self.volumeBlock([[AVAudioSession sharedInstance] outputVolume]);
     }
     else
     {
@@ -460,5 +463,12 @@ static OSStatus	performRender (void                         *inRefCon,
     return _audioChainIsBeingReconstructed;
 }
 
+- (void)setVolumeChangedBlock:(audio_volume_change_callback_t)block
+{
+    self.volumeBlock = block;
+}
+
+
 
 @end
+
