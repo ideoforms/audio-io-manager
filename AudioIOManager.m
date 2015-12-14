@@ -214,29 +214,38 @@ static OSStatus	performRender (void                         *inRefCon,
         [sessionInstance setPreferredSampleRate:44100 error:&error];
         XThrowIfError((OSStatus)error.code, @"Couldn't set session's preferred sample rate");
         
+
+        
+        /*---------------------------------------------------------------------*
+         * NOTIFICATIONS
+         *----------------------------------------------------------------------
+         * Register for changes in various properties.
+         *--------------------------------------------------------------------*/
+        NSNotificationCenter *notificationCenter = [NSNotificationCenter defaultCenter];
+        
         /*---------------------------------------------------------------------*
          * Add interruption handler
          *--------------------------------------------------------------------*/
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(handleInterruption:)
-                                                     name:AVAudioSessionInterruptionNotification
-                                                   object:sessionInstance];
+        [notificationCenter addObserver:self
+                               selector:@selector(handleInterruption:)
+                                   name:AVAudioSessionInterruptionNotification
+                                 object:sessionInstance];
         
         /*---------------------------------------------------------------------*
          * Notify for change of route (eg. built-in speaker -> headphones)
          *--------------------------------------------------------------------*/
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(handleRouteChange:)
-                                                     name:AVAudioSessionRouteChangeNotification
-                                                   object:sessionInstance];
+        [notificationCenter addObserver:self
+                               selector:@selector(handleRouteChange:)
+                                   name:AVAudioSessionRouteChangeNotification
+                                 object:sessionInstance];
 
         /*---------------------------------------------------------------------*
          * If media services are reset, we need to rebuild our audio chain.
          *--------------------------------------------------------------------*/
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(handleMediaServerReset:)
-                                                     name:AVAudioSessionMediaServicesWereResetNotification
-                                                   object:sessionInstance];
+        [notificationCenter addObserver:self
+                               selector:@selector(handleMediaServerReset:)
+                                   name:AVAudioSessionMediaServicesWereResetNotification
+                                 object:sessionInstance];
 
         /*---------------------------------------------------------------------*
          * Receive notification when system volume changed (via KVO)
@@ -401,7 +410,7 @@ static OSStatus	performRender (void                         *inRefCon,
     
     if ([keyPath isEqual:@"outputVolume"])
     {
-        NSLog(@"volume changed!");
+        NSLog(@"volume changed: %f", [[AVAudioSession sharedInstance] outputVolume]);
     }
     else
     {
