@@ -237,6 +237,14 @@ static OSStatus	performRender (void                         *inRefCon,
                                                  selector:@selector(handleMediaServerReset:)
                                                      name:AVAudioSessionMediaServicesWereResetNotification
                                                    object:sessionInstance];
+
+        /*---------------------------------------------------------------------*
+         * Receive notification when system volume changed (via KVO)
+         *--------------------------------------------------------------------*/
+        [sessionInstance addObserver:self
+                          forKeyPath:@"outputVolume"
+                             options:0
+                             context:nil];
         
         /*---------------------------------------------------------------------*
          * Activate the audio session.
@@ -387,6 +395,18 @@ static OSStatus	performRender (void                         *inRefCon,
 - (BOOL)audioChainIsBeingReconstructed
 {
     return _audioChainIsBeingReconstructed;
+}
+
+-(void) observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
+    
+    if ([keyPath isEqual:@"outputVolume"])
+    {
+        NSLog(@"volume changed!");
+    }
+    else
+    {
+        [super observeValueForKeyPath:keyPath ofObject:object change:channel_pointers context:context];
+    }
 }
 
 @end
