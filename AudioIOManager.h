@@ -35,7 +35,10 @@
  * When this function is called, `data` contains input samples.
  * To write output samples, overwrite the contents of `data`.
  *----------------------------------------------------------------------------*/
-typedef void (*audio_callback_t)(float **data, int num_channels, int num_frames);
+typedef void (*audio_data_callback_t)(float **data, int num_channels, int num_frames);
+
+typedef void (*audio_volume_change_callback_t)(float volume);
+
 
 @interface AudioIOManager : NSObject
 
@@ -50,7 +53,14 @@ typedef void (*audio_callback_t)(float **data, int num_channels, int num_frames)
  *
  * @param callback A pure C function called when an audio buffer is available.
  *----------------------------------------------------------------------------*/
-- (id)          initWithCallback:(audio_callback_t)callback;
+- (id)          initWithCallback:(audio_data_callback_t)callback;
+
+/**-----------------------------------------------------------------------------
+ * Set volume change callback.
+ *
+ * @param callback A pure C function called when system volume is changed.
+ *----------------------------------------------------------------------------*/
+- (void)        setVolumeChangedBlock:(audio_volume_change_callback_t)callback;
 
 /**-----------------------------------------------------------------------------
  * Start audio.

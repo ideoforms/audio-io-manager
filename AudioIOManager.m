@@ -19,6 +19,13 @@
  *----------------------------------------------------------------------------*/
 static float *channel_pointers[32];
 
+
+
+
+////////////////////////////////////////////////////////////////////////////////
+#pragma mark - Audio I/O callbacks
+////////////////////////////////////////////////////////////////////////////////
+
 /*----------------------------------------------------------------------------*
  * Struct to relay data to the C callback.
  *----------------------------------------------------------------------------*/
@@ -82,6 +89,12 @@ static OSStatus	performRender (void                         *inRefCon,
 
 @implementation AudioIOManager
 
+
+
+////////////////////////////////////////////////////////////////////////////////
+#pragma mark - Creation/deletion
+////////////////////////////////////////////////////////////////////////////////
+
 - (id)initWithCallback:(audio_callback_t)callback
 {
     self = [super init];
@@ -100,6 +113,15 @@ static OSStatus	performRender (void                         *inRefCon,
 {
     return [self initWithCallback:NULL];
 }
+
+- (void)dealloc
+{
+    // Remove KVO
+}
+
+////////////////////////////////////////////////////////////////////////////////
+#pragma mark - Audio I/O callbacks
+////////////////////////////////////////////////////////////////////////////////
 
 /*----------------------------------------------------------------------------*
  * Called when audio I/O is interrupted
@@ -184,6 +206,11 @@ static OSStatus	performRender (void                         *inRefCon,
     
     self.audioChainIsBeingReconstructed = NO;
 }
+
+
+////////////////////////////////////////////////////////////////////////////////
+#pragma mark - Audio setup
+////////////////////////////////////////////////////////////////////////////////
 
 - (BOOL)setupAudioSession
 {
@@ -372,6 +399,27 @@ static OSStatus	performRender (void                         *inRefCon,
     return YES;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+#pragma mark - Key-value observation
+////////////////////////////////////////////////////////////////////////////////
+
+
+- (void) observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
+    
+    if ([keyPath isEqual:@"outputVolume"])
+    {
+        NSLog(@"volume changed: %f", [[AVAudioSession sharedInstance] outputVolume]);
+    }
+    else
+    {
+        [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+#pragma mark - Start/stop
+////////////////////////////////////////////////////////////////////////////////
+
 - (OSStatus)start
 {
     /*---------------------------------------------------------------------*
@@ -395,6 +443,12 @@ static OSStatus	performRender (void                         *inRefCon,
     return err;
 }
 
+
+////////////////////////////////////////////////////////////////////////////////
+#pragma mark - Getters and setters
+////////////////////////////////////////////////////////////////////////////////
+
+
 - (double)sessionSampleRate
 {
     return [[AVAudioSession sharedInstance] sampleRate];
@@ -406,16 +460,5 @@ static OSStatus	performRender (void                         *inRefCon,
     return _audioChainIsBeingReconstructed;
 }
 
--(void) observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
-    
-    if ([keyPath isEqual:@"outputVolume"])
-    {
-        NSLog(@"volume changed: %f", [[AVAudioSession sharedInstance] outputVolume]);
-    }
-    else
-    {
-        [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
-    }
-}
 
 @end
