@@ -414,7 +414,7 @@ static OSStatus	performRender (void                         *inRefCon,
     }
     else
     {
-        [super observeValueForKeyPath:keyPath ofObject:object change:channel_pointers context:context];
+        [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
     }
 }
 
