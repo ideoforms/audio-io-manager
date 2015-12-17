@@ -101,8 +101,6 @@ static OSStatus	performRender (void                         *inRefCon,
     self = [super init];
     if (!self) return nil;
 
-    NSLog(@"**** RUNNING PROTOTYPE AUDIO DRIVER ****\n");
-    
     self.callback = callback;
     self.volumeBlock = NULL;
     self.isInitialised = [self setupAudioChain];
@@ -129,7 +127,6 @@ static OSStatus	performRender (void                         *inRefCon,
     @try
     {
         UInt8 interruptionType = [[notification.userInfo valueForKey:AVAudioSessionInterruptionTypeKey] intValue];
-        NSLog(@"Session interrupted > --- %@ ---\n", interruptionType == AVAudioSessionInterruptionTypeBegan ? @"Begin Interruption" : @"End Interruption");
         
         if (interruptionType == AVAudioSessionInterruptionTypeBegan)
         {
@@ -141,7 +138,6 @@ static OSStatus	performRender (void                         *inRefCon,
             // make sure to activate the session
             NSError *error = nil;
             [[AVAudioSession sharedInstance] setActive:YES error:&error];
-            if (nil != error) NSLog(@"AVAudioSession set active failed with error: %@", error);
             
             [self start];
         }
@@ -161,39 +157,27 @@ static OSStatus	performRender (void                         *inRefCon,
     UInt8 reasonValue = [[notification.userInfo valueForKey:AVAudioSessionRouteChangeReasonKey] intValue];
     AVAudioSessionRouteDescription *routeDescription = [notification.userInfo valueForKey:AVAudioSessionRouteChangePreviousRouteKey];
     
-    NSLog(@"Route change:");
     switch (reasonValue)
     {
         case AVAudioSessionRouteChangeReasonNewDeviceAvailable:
-            NSLog(@"     NewDeviceAvailable");
             break;
         case AVAudioSessionRouteChangeReasonOldDeviceUnavailable:
-            NSLog(@"     OldDeviceUnavailable");
             break;
         case AVAudioSessionRouteChangeReasonCategoryChange:
-            NSLog(@"     CategoryChange");
-            NSLog(@" New Category: %@", [[AVAudioSession sharedInstance] category]);
             break;
         case AVAudioSessionRouteChangeReasonOverride:
-            NSLog(@"     Override");
             break;
         case AVAudioSessionRouteChangeReasonWakeFromSleep:
-            NSLog(@"     WakeFromSleep");
             break;
         case AVAudioSessionRouteChangeReasonNoSuitableRouteForCategory:
-            NSLog(@"     NoSuitableRouteForCategory");
             break;
         default:
-            NSLog(@"     ReasonUnknown");
+            break;
     }
-    
-    NSLog(@"Previous route:\n");
-    NSLog(@"%@", routeDescription);
 }
 
 - (void)handleMediaServerReset:(NSNotification *)notification
 {
-    NSLog(@"Media server has reset");
     self.audioChainIsBeingReconstructed = YES;
     
     usleep(25000);
@@ -373,7 +357,6 @@ static OSStatus	performRender (void                         *inRefCon,
     
     @catch (NSException *e)
     {
-        NSLog(@"Error returned from setupIOUnit: %@", e);
         return NO;
     }
 }
