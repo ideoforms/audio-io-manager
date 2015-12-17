@@ -155,7 +155,7 @@ static OSStatus	performRender (void                         *inRefCon,
 - (void)handleRouteChange:(NSNotification *)notification
 {
     UInt8 reasonValue = [[notification.userInfo valueForKey:AVAudioSessionRouteChangeReasonKey] intValue];
-    AVAudioSessionRouteDescription *routeDescription = [notification.userInfo valueForKey:AVAudioSessionRouteChangePreviousRouteKey];
+    // AVAudioSessionRouteDescription *routeDescription = [notification.userInfo valueForKey:AVAudioSessionRouteChangePreviousRouteKey];
     
     switch (reasonValue)
     {
