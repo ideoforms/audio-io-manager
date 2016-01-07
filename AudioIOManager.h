@@ -29,6 +29,10 @@
 #import <AVFoundation/AVAudioSession.h>
 
 
+#define AUDIO_SAMPLE_RATE 44100.0
+#define AUDIO_BUFFER_SIZE 256
+
+
 /**-----------------------------------------------------------------------------
  * Typedef for the audio data I/O callback.
  *

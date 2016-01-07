@@ -212,14 +212,14 @@ static OSStatus	performRender (void                         *inRefCon,
         /*---------------------------------------------------------------------*
          * Set up a low-latency buffer.
          *--------------------------------------------------------------------*/
-        NSTimeInterval bufferDuration = 0.002;
+        NSTimeInterval bufferDuration = (float) AUDIO_BUFFER_SIZE / AUDIO_SAMPLE_RATE;
         [sessionInstance setPreferredIOBufferDuration:bufferDuration error:&error];
         XThrowIfError((OSStatus)error.code, @"Couldn't set session's I/O buffer duration");
         
         /*---------------------------------------------------------------------*
          * Set preferred sample rate.
          *--------------------------------------------------------------------*/
-        [sessionInstance setPreferredSampleRate:44100 error:&error];
+        [sessionInstance setPreferredSampleRate:AUDIO_SAMPLE_RATE error:&error];
         XThrowIfError((OSStatus)error.code, @"Couldn't set session's preferred sample rate");
         
 
