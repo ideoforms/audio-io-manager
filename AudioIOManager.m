@@ -442,11 +442,15 @@ static OSStatus	performRender (void                         *inRefCon,
 ////////////////////////////////////////////////////////////////////////////////
 
 
-- (double)sessionSampleRate
+- (double)sampleRate
 {
     return [[AVAudioSession sharedInstance] sampleRate];
 }
 
+- (double)volume
+{
+	return [[AVAudioSession sharedInstance] outputVolume];
+}
 
 - (BOOL)audioChainIsBeingReconstructed
 {

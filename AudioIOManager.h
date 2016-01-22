@@ -79,6 +79,11 @@ typedef void (*audio_volume_change_callback_t)(float volume);
 /**-----------------------------------------------------------------------------
  * Returns the current session's sample rate.
  *----------------------------------------------------------------------------*/
-- (double)      sessionSampleRate;
+- (double)      sampleRate;
+
+/**-----------------------------------------------------------------------------
+ * Returns the current session's hardware output volume [0, 1]
+ *----------------------------------------------------------------------------*/
+- (double)      volume;
 
 @end
