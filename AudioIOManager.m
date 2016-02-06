@@ -33,7 +33,8 @@ struct CallbackData
 {
     AudioUnit               audioIOUnit;
     BOOL*                   audioChainIsBeingReconstructed;
-    audio_data_callback_t        callback;
+    audio_data_callback_t   callback;
+    __unsafe_unretained id  delegate;
 } cd;
 
 
@@ -55,7 +56,6 @@ static OSStatus	performRender (void                         *inRefCon,
     
     if (*cd.audioChainIsBeingReconstructed == NO)
     {
-
         err = AudioUnitRender(cd.audioIOUnit, ioActionFlags, inTimeStamp, 1, inNumberFrames, ioData);
         
         if (cd.callback)
@@ -63,6 +63,10 @@ static OSStatus	performRender (void                         *inRefCon,
             for (UInt32 c = 0; c < ioData->mNumberBuffers; ++c)
                 channel_pointers[c] = (float *) ioData->mBuffers[c].mData;
             cd.callback(channel_pointers, ioData->mNumberBuffers, inNumberFrames);
+        }
+        else if (cd.delegate)
+        {
+            [cd.delegate audioCallback:ioData numFrames:inNumberFrames];
         }
     }
     
@@ -81,6 +85,7 @@ static OSStatus	performRender (void                         *inRefCon,
  *----------------------------------------------------------------------------*/
 @property (assign) audio_data_callback_t callback;
 @property (assign) audio_volume_change_callback_t volumeBlock;
+
 
 @property (nonatomic, assign) AudioUnit audioIOUnit;
 @property (nonatomic, assign) BOOL audioChainIsBeingReconstructed;
@@ -101,12 +106,28 @@ static OSStatus	performRender (void                         *inRefCon,
     self = [super init];
     if (!self) return nil;
 
+    self.delegate = nil;
     self.callback = callback;
-    self.volumeBlock = NULL;
+    
+    self.volumeBlock = nil;
     self.isInitialised = [self setupAudioChain];
 
     return self;
 
+}
+
+- (id)initWithDelegate:(id<AudioIODelegate>)delegate
+{
+    self = [super init];
+    if (!self) return nil;
+    
+    self.delegate = delegate;
+    self.callback = nil;
+    
+    self.volumeBlock = nil;
+    self.isInitialised = [self setupAudioChain];
+    
+    return self;
 }
 
 - (id)init
@@ -335,6 +356,7 @@ static OSStatus	performRender (void                         *inRefCon,
         cd.audioIOUnit = self.audioIOUnit;
         cd.audioChainIsBeingReconstructed = &_audioChainIsBeingReconstructed;
         cd.callback = self.callback;
+        cd.delegate = self.delegate;
         
         /*---------------------------------------------------------------------*
          * Set the render callback on AURemoteIO

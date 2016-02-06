@@ -3,7 +3,15 @@
  *  AudioIOManager
  *
  *  Singleton object that creates an iOS audio session and registers
- *  a C function callback for input and output of audio samples:
+ *  a callback to take place when new audio data is available.
+ *
+ *  The callback can either be in the form of a C function pointer
+ *  (see below) or an Objective-C delegate following the AudioIODelegate
+ *  protocol.
+ *
+ *  Example usage:
+ *
+ *  static int pos = 0;
  *
  *  void audio_callback(float **samples, int num_channels, int num_frames)
  *  {
@@ -19,7 +27,7 @@
  *  AudioIOManager *manager = [[AudioIOManager alloc] initWithCallback:audio_callback];
  *  [manager start];
  *
- *  Copyright (c) Daniel Jones 2015 <http://www.erase.net/>
+ *  Copyright (c) Daniel Jones 2015-2016 <http://www.erase.net/>
  *  Provided under the MIT License. <https://opensource.org/licenses/MIT>
  *
  *----------------------------------------------------------------------------*/
@@ -40,8 +48,21 @@
  * To write output samples, overwrite the contents of `data`.
  *----------------------------------------------------------------------------*/
 typedef void (*audio_data_callback_t)(float **data, int num_channels, int num_frames);
-
 typedef void (*audio_volume_change_callback_t)(float volume);
+
+
+/**-----------------------------------------------------------------------------
+ * Protocol for delegates to follow.
+ *----------------------------------------------------------------------------*/
+@protocol AudioIODelegate
+
+/**-----------------------------------------------------------------------------
+ * Called when a new audio buffer is available.
+ *----------------------------------------------------------------------------*/
+- (void)audioCallback:(AudioBufferList *)bufferList
+            numFrames:(UInt32)numFrames;
+
+@end
 
 
 @interface AudioIOManager : NSObject
@@ -53,11 +74,23 @@ typedef void (*audio_volume_change_callback_t)(float volume);
 @property (assign) BOOL isInitialised;
 
 /**-----------------------------------------------------------------------------
+ * Delegate.
+ *----------------------------------------------------------------------------*/
+@property (strong) id <AudioIODelegate> delegate;
+
+/**-----------------------------------------------------------------------------
  * Create a new audio I/O unit.
  *
  * @param callback A pure C function called when an audio buffer is available.
  *----------------------------------------------------------------------------*/
 - (id)          initWithCallback:(audio_data_callback_t)callback;
+
+/**-----------------------------------------------------------------------------
+ * Create a new audio I/O unit.
+ *
+ * @param delegate Delegate object, observing the AudioIODelegate protocol.
+ *----------------------------------------------------------------------------*/
+- (id)          initWithDelegate:(id <AudioIODelegate>)delegate;
 
 /**-----------------------------------------------------------------------------
  * Set volume change callback.
