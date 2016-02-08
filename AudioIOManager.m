@@ -339,9 +339,9 @@ static OSStatus	performRender (void                         *inRefCon,
         audioFormat.mFormatFlags        = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
         audioFormat.mFramesPerPacket    = 1;
         audioFormat.mChannelsPerFrame   = 1;
-        audioFormat.mBitsPerChannel     = 32;
-        audioFormat.mBytesPerPacket     = 4;
-        audioFormat.mBytesPerFrame      = 4;
+        audioFormat.mBitsPerChannel     = 8 * sizeof(float);
+        audioFormat.mBytesPerFrame      = sizeof(float) * audioFormat.mChannelsPerFrame;
+        audioFormat.mBytesPerPacket     = audioFormat.mBytesPerFrame * audioFormat.mFramesPerPacket;
 
         XThrowIfError(AudioUnitSetProperty(self.audioIOUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &audioFormat, sizeof(audioFormat)),
                       @"couldn't set the input client format on AURemoteIO");
