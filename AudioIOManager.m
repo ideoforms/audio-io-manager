@@ -242,8 +242,13 @@ static OSStatus	performRender (void                         *inRefCon,
          *--------------------------------------------------------------------*/
         [sessionInstance setPreferredSampleRate:AUDIO_SAMPLE_RATE error:&error];
         XThrowIfError((OSStatus)error.code, @"Couldn't set session's preferred sample rate");
-        
 
+        /*---------------------------------------------------------------------*
+         * Route to base speaker
+         * TODO: Add setter to give option of sending audio to ear
+         *--------------------------------------------------------------------*/
+        [sessionInstance overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:&error];
+        XThrowIfError((OSStatus)error.code, @"Couldn't route session to speaker");
         
         /*---------------------------------------------------------------------*
          * NOTIFICATIONS
