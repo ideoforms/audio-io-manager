@@ -36,8 +36,6 @@
 #import <AVFoundation/AVFoundation.h>
 #import <AVFoundation/AVAudioSession.h>
 
-
-#define AUDIO_SAMPLE_RATE 44100.0
 #define AUDIO_BUFFER_SIZE 256
 
 
@@ -54,13 +52,16 @@ typedef void (*audio_volume_change_callback_t)(float volume);
 /**-----------------------------------------------------------------------------
  * Protocol for delegates to follow.
  *----------------------------------------------------------------------------*/
-@protocol AudioIODelegate
-
+@protocol AudioIODelegate<NSObject>
+@optional
 /**-----------------------------------------------------------------------------
  * Called when a new audio buffer is available.
  *----------------------------------------------------------------------------*/
 - (void)audioCallback:(AudioBufferList *)bufferList
             numFrames:(UInt32)numFrames;
+
+- (void) portChangeStarted;
+- (void) portChangeFinished;
 
 @end
 
@@ -91,6 +92,14 @@ typedef void (*audio_volume_change_callback_t)(float volume);
  * @param delegate Delegate object, observing the AudioIODelegate protocol.
  *----------------------------------------------------------------------------*/
 - (id)          initWithDelegate:(id <AudioIODelegate>)delegate;
+
+/**
+ *  Set the preferred output port (loudspeaker)
+ *
+ *  @param port
+ *
+ */
+- (void) setPreferredOutputPort:(AVAudioSessionPortOverride) port;
 
 /**-----------------------------------------------------------------------------
  * Set volume change callback.

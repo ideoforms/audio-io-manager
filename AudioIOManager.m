@@ -76,16 +76,12 @@ static OSStatus	performRender (void                         *inRefCon,
 
 @interface AudioIOManager ()
 
-- (BOOL)setupAudioSession;
-- (BOOL)setupIOUnit;
-- (BOOL)setupAudioChain;
-
 /**-----------------------------------------------------------------------------
  * Pointer to the C function called when samples have been read.
  *----------------------------------------------------------------------------*/
 @property (assign) audio_data_callback_t callback;
 @property (assign) audio_volume_change_callback_t volumeBlock;
-
+@property (assign) AVAudioSessionPortOverride preferredPort;
 
 @property (nonatomic, assign) AudioUnit audioIOUnit;
 @property (nonatomic, assign) BOOL audioChainIsBeingReconstructed;
@@ -110,7 +106,8 @@ static OSStatus	performRender (void                         *inRefCon,
     self.callback = callback;
     
     self.volumeBlock = nil;
-    self.isInitialised = [self setupAudioChain];
+    self.preferredPort = AVAudioSessionPortOverrideSpeaker;
+    self.isInitialised = [self setupAudioChainForPort:self.preferredPort];
 
     return self;
 
@@ -125,7 +122,8 @@ static OSStatus	performRender (void                         *inRefCon,
     self.callback = nil;
     
     self.volumeBlock = nil;
-    self.isInitialised = [self setupAudioChain];
+    self.preferredPort = AVAudioSessionPortOverrideSpeaker;
+    self.isInitialised = [self setupAudioChainForPort:self.preferredPort];
     
     return self;
 }
@@ -203,7 +201,7 @@ static OSStatus	performRender (void                         *inRefCon,
     
     usleep(25000);
     
-    [self setupAudioChain];
+    [self setupAudioChainForPort:self.preferredPort];
     [self start];
     
     self.audioChainIsBeingReconstructed = NO;
@@ -214,7 +212,7 @@ static OSStatus	performRender (void                         *inRefCon,
 #pragma mark - Audio setup
 ////////////////////////////////////////////////////////////////////////////////
 
-- (BOOL)setupAudioSession
+- (BOOL)setupAudioSessionForPort:(AVAudioSessionPortOverride) port
 {
     @try
     {
@@ -222,6 +220,7 @@ static OSStatus	performRender (void                         *inRefCon,
          * Configure the audio session
          *--------------------------------------------------------------------*/
         AVAudioSession *sessionInstance = [AVAudioSession sharedInstance];
+        [sessionInstance setPreferredOutputNumberOfChannels:0 error:nil];
 
         /*---------------------------------------------------------------------*
          * Register for audio input and output.
@@ -233,23 +232,21 @@ static OSStatus	performRender (void                         *inRefCon,
         /*---------------------------------------------------------------------*
          * Set up a low-latency buffer.
          *--------------------------------------------------------------------*/
-        NSTimeInterval bufferDuration = (float) AUDIO_BUFFER_SIZE / AUDIO_SAMPLE_RATE;
+        NSTimeInterval bufferDuration = (float) AUDIO_BUFFER_SIZE / 44100;
         [sessionInstance setPreferredIOBufferDuration:bufferDuration error:&error];
         XThrowIfError((OSStatus)error.code, @"Couldn't set session's I/O buffer duration");
         
         /*---------------------------------------------------------------------*
          * Set preferred sample rate.
          *--------------------------------------------------------------------*/
-        [sessionInstance setPreferredSampleRate:AUDIO_SAMPLE_RATE error:&error];
+        [sessionInstance setPreferredSampleRate:44100 error:&error];
         XThrowIfError((OSStatus)error.code, @"Couldn't set session's preferred sample rate");
 
         /*---------------------------------------------------------------------*
-         * Route to base speaker
-         * TODO: Add setter to give option of sending audio to ear
+         * Route to speaker
          *--------------------------------------------------------------------*/
-        [sessionInstance overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:&error];
-        XThrowIfError((OSStatus)error.code, @"Couldn't route session to speaker");
-        
+        [sessionInstance overrideOutputAudioPort:port error:&error];
+
         /*---------------------------------------------------------------------*
          * NOTIFICATIONS
          *----------------------------------------------------------------------
@@ -292,7 +289,7 @@ static OSStatus	performRender (void                         *inRefCon,
         /*---------------------------------------------------------------------*
          * Activate the audio session.
          *--------------------------------------------------------------------*/
-        [[AVAudioSession sharedInstance] setActive:YES error:&error];
+        [sessionInstance setActive:YES error:&error];
         XThrowIfError((OSStatus) error.code, @"Couldn't set session active");
         
         return YES;
@@ -303,6 +300,12 @@ static OSStatus	performRender (void                         *inRefCon,
         NSLog(@"Error returned from setupAudioSession: %@", e);
         return NO;
     }
+}
+
+- (void) routeToLoudspeaker:(BOOL) loudspeaker{
+    
+
+    
 }
 
 
@@ -339,7 +342,7 @@ static OSStatus	performRender (void                         *inRefCon,
          * Explicitly set the audio format to 32-bit float.
          *--------------------------------------------------------------------*/
         AudioStreamBasicDescription audioFormat;
-        audioFormat.mSampleRate         = 44100.00;
+        audioFormat.mSampleRate         = [AVAudioSession sharedInstance].sampleRate;
         audioFormat.mFormatID           = kAudioFormatLinearPCM;
         audioFormat.mFormatFlags        = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
         audioFormat.mFramesPerPacket    = 1;
@@ -388,7 +391,7 @@ static OSStatus	performRender (void                         *inRefCon,
     }
 }
 
-- (BOOL)setupAudioChain
+- (BOOL)setupAudioChainForPort:(AVAudioSessionPortOverride)port
 {
     BOOL ok;
     
@@ -397,7 +400,7 @@ static OSStatus	performRender (void                         *inRefCon,
      *  - set our AVAudioSession configuration
      *  - create a remote I/O unit and register an I/O callback
      *--------------------------------------------------------------------*/
-    ok = [self setupAudioSession];
+    ok = [self setupAudioSessionForPort:port];
     if (!ok) return NO;
     
     ok = [self setupIOUnit];
@@ -468,6 +471,21 @@ static OSStatus	performRender (void                         *inRefCon,
 #pragma mark - Getters and setters
 ////////////////////////////////////////////////////////////////////////////////
 
+
+- (void)setPreferredOutputPort:(AVAudioSessionPortOverride)port {
+    
+    self.preferredPort = port;
+    
+    self.audioChainIsBeingReconstructed = YES;
+    
+    usleep(25000);
+    
+    [self setupAudioChainForPort:self.preferredPort];
+    [self start];
+    
+    self.audioChainIsBeingReconstructed = NO;
+    
+}
 
 - (double)sampleRate
 {
