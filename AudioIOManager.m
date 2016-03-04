@@ -174,46 +174,23 @@ static OSStatus	performRender (void                         *inRefCon,
 - (void)handleRouteChange:(NSNotification *)notification
 {
     UInt8 reasonValue = [[notification.userInfo valueForKey:AVAudioSessionRouteChangeReasonKey] intValue];
-    // AVAudioSessionRouteDescription *routeDescription = [notification.userInfo valueForKey:AVAudioSessionRouteChangePreviousRouteKey];
     
+    //TODO : is it safe to assume firstObject here?
     AVAudioSessionPortDescription *port = [AVAudioSession sharedInstance].currentRoute.outputs.firstObject;
 
-    
     DLog(@"%@ Sample Rate:%0.0fHz I/O Buffer Duration:%f \n%@", port.portType, [AVAudioSession sharedInstance].sampleRate, [AVAudioSession sharedInstance].IOBufferDuration, notification.userInfo[AVAudioSessionRouteChangeReasonKey]);
     
-    switch (reasonValue)
+    if (reasonValue == AVAudioSessionRouteChangeReasonNewDeviceAvailable ||
+        reasonValue == AVAudioSessionRouteChangeReasonOldDeviceUnavailable ||
+        reasonValue == AVAudioSessionRouteChangeReasonOverride)
     {
-        case AVAudioSessionRouteChangeReasonNewDeviceAvailable:
-            if (self.delegate && [self.delegate respondsToSelector:@selector(audioIOPortChanged)]) {
-                [self.delegate audioIOPortChanged];
-            }
-            [self setupIOUnit];
-            [self start];
-            break;
-        case AVAudioSessionRouteChangeReasonOldDeviceUnavailable:
-            if (self.delegate && [self.delegate respondsToSelector:@selector(audioIOPortChanged)]) {
-                [self.delegate audioIOPortChanged];
-            }
-            break;
-        case AVAudioSessionRouteChangeReasonCategoryChange:// called when the session first starts
-            [self setupIOUnit];
-            [self start];
-            break;
-        case AVAudioSessionRouteChangeReasonOverride:
-            if (self.delegate && [self.delegate respondsToSelector:@selector(audioIOPortChanged)]) {
-                [self.delegate audioIOPortChanged];
-                [self setupIOUnit];
-                [self start];
-            }
-            break;
-        case AVAudioSessionRouteChangeReasonWakeFromSleep:
-            break;
-        case AVAudioSessionRouteChangeReasonNoSuitableRouteForCategory:
-            break;
-        default:
-            break;
+        if (self.delegate && [self.delegate respondsToSelector:@selector(audioIOPortChanged)]) {
+            [self.delegate audioIOPortChanged];
+        }
+        [self setupIOUnit];
+        [self start];
     }
-        
+    
     if ([port.portType isEqualToString:AVAudioSessionPortBuiltInReceiver]) {
         [[AVAudioSession sharedInstance] overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:nil];
     }
