@@ -107,7 +107,7 @@ static OSStatus	performRender (void                         *inRefCon,
     
     self.volumeBlock = nil;
     self.preferredPort = AVAudioSessionPortOverrideSpeaker;
-    self.isInitialised = [self setupAudioChainForPort:self.preferredPort];
+    self.isInitialised = [self setupAudioChain];
 
     return self;
 
@@ -123,7 +123,7 @@ static OSStatus	performRender (void                         *inRefCon,
     
     self.volumeBlock = nil;
     self.preferredPort = AVAudioSessionPortOverrideSpeaker;
-    self.isInitialised = [self setupAudioChainForPort:self.preferredPort];
+    self.isInitialised = [self setupAudioChain];
     
     return self;
 }
@@ -176,15 +176,35 @@ static OSStatus	performRender (void                         *inRefCon,
     UInt8 reasonValue = [[notification.userInfo valueForKey:AVAudioSessionRouteChangeReasonKey] intValue];
     // AVAudioSessionRouteDescription *routeDescription = [notification.userInfo valueForKey:AVAudioSessionRouteChangePreviousRouteKey];
     
+    AVAudioSessionPortDescription *port = [AVAudioSession sharedInstance].currentRoute.outputs.firstObject;
+
+    
+    DLog(@"%@ Sample Rate:%0.0fHz I/O Buffer Duration:%f \n%@", port.portType, [AVAudioSession sharedInstance].sampleRate, [AVAudioSession sharedInstance].IOBufferDuration, notification.userInfo[AVAudioSessionRouteChangeReasonKey]);
+    
     switch (reasonValue)
     {
         case AVAudioSessionRouteChangeReasonNewDeviceAvailable:
+            if (self.delegate && [self.delegate respondsToSelector:@selector(audioIOPortChanged)]) {
+                [self.delegate audioIOPortChanged];
+            }
+            [self setupIOUnit];
+            [self start];
             break;
         case AVAudioSessionRouteChangeReasonOldDeviceUnavailable:
+            if (self.delegate && [self.delegate respondsToSelector:@selector(audioIOPortChanged)]) {
+                [self.delegate audioIOPortChanged];
+            }
             break;
-        case AVAudioSessionRouteChangeReasonCategoryChange:
+        case AVAudioSessionRouteChangeReasonCategoryChange:// called when the session first starts
+            [self setupIOUnit];
+            [self start];
             break;
         case AVAudioSessionRouteChangeReasonOverride:
+            if (self.delegate && [self.delegate respondsToSelector:@selector(audioIOPortChanged)]) {
+                [self.delegate audioIOPortChanged];
+                [self setupIOUnit];
+                [self start];
+            }
             break;
         case AVAudioSessionRouteChangeReasonWakeFromSleep:
             break;
@@ -193,18 +213,33 @@ static OSStatus	performRender (void                         *inRefCon,
         default:
             break;
     }
+        
+    if ([port.portType isEqualToString:AVAudioSessionPortBuiltInReceiver]) {
+        [[AVAudioSession sharedInstance] overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:nil];
+    }
+    
+
 }
 
-- (void)handleMediaServerReset:(NSNotification *)notification
+- (void)reset:(NSNotification *)notification
 {
+    
+    if (self.delegate && [self.delegate respondsToSelector:@selector(audioIOPortChangeStarted)]) {
+        [self.delegate audioIOPortChangeStarted];
+    }
+    
     self.audioChainIsBeingReconstructed = YES;
     
     usleep(25000);
     
-    [self setupAudioChainForPort:self.preferredPort];
+    [self setupAudioChain];
     [self start];
     
     self.audioChainIsBeingReconstructed = NO;
+    
+    if (self.delegate && [self.delegate respondsToSelector:@selector(audioIOPortChangeFinished)]) {
+        [self.delegate audioIOPortChangeFinished];
+    }
 }
 
 
@@ -212,29 +247,24 @@ static OSStatus	performRender (void                         *inRefCon,
 #pragma mark - Audio setup
 ////////////////////////////////////////////////////////////////////////////////
 
-- (BOOL)setupAudioSessionForPort:(AVAudioSessionPortOverride) port
+- (BOOL)setupAudioSession
 {
     @try
     {
+        NSError *error = nil;
+
         /*---------------------------------------------------------------------*
          * Configure the audio session
          *--------------------------------------------------------------------*/
         AVAudioSession *sessionInstance = [AVAudioSession sharedInstance];
-        [sessionInstance setPreferredOutputNumberOfChannels:0 error:nil];
 
-        /*---------------------------------------------------------------------*
-         * Register for audio input and output.
-         *--------------------------------------------------------------------*/
-        NSError *error = nil;
-        [sessionInstance setCategory:AVAudioSessionCategoryPlayAndRecord error:&error];
-        XThrowIfError((OSStatus)error.code, @"Couldn't set session's audio category");
-
-        /*---------------------------------------------------------------------*
-         * Set up a low-latency buffer.
-         *--------------------------------------------------------------------*/
-        NSTimeInterval bufferDuration = (float) AUDIO_BUFFER_SIZE / 44100;
-        [sessionInstance setPreferredIOBufferDuration:bufferDuration error:&error];
-        XThrowIfError((OSStatus)error.code, @"Couldn't set session's I/O buffer duration");
+        
+        AVAudioSessionPortDescription *port = [AVAudioSession sharedInstance].currentRoute.outputs.firstObject;
+        
+        
+        if ([port.portType isEqualToString:AVAudioSessionPortBuiltInReceiver]) {
+            [[AVAudioSession sharedInstance] overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:nil];
+        }
         
         /*---------------------------------------------------------------------*
          * Set preferred sample rate.
@@ -242,11 +272,20 @@ static OSStatus	performRender (void                         *inRefCon,
         [sessionInstance setPreferredSampleRate:44100 error:&error];
         XThrowIfError((OSStatus)error.code, @"Couldn't set session's preferred sample rate");
 
+        
         /*---------------------------------------------------------------------*
-         * Route to speaker
+         * Register for audio input and output.
          *--------------------------------------------------------------------*/
-        [sessionInstance overrideOutputAudioPort:port error:&error];
+        [sessionInstance setCategory:AVAudioSessionCategoryPlayAndRecord error:&error];
+        XThrowIfError((OSStatus)error.code, @"Couldn't set session's audio category");
 
+        /*---------------------------------------------------------------------*
+         * Set up a low-latency buffer.
+         *--------------------------------------------------------------------*/
+        NSTimeInterval bufferDuration = (float) AUDIO_BUFFER_SIZE / sessionInstance.sampleRate;
+        [sessionInstance setPreferredIOBufferDuration:bufferDuration error:&error];
+        XThrowIfError((OSStatus)error.code, @"Couldn't set session's I/O buffer duration");
+        
         /*---------------------------------------------------------------------*
          * NOTIFICATIONS
          *----------------------------------------------------------------------
@@ -274,7 +313,7 @@ static OSStatus	performRender (void                         *inRefCon,
          * If media services are reset, we need to rebuild our audio chain.
          *--------------------------------------------------------------------*/
         [notificationCenter addObserver:self
-                               selector:@selector(handleMediaServerReset:)
+                               selector:@selector(reset:)
                                    name:AVAudioSessionMediaServicesWereResetNotification
                                  object:sessionInstance];
 
@@ -302,17 +341,18 @@ static OSStatus	performRender (void                         *inRefCon,
     }
 }
 
-- (void) routeToLoudspeaker:(BOOL) loudspeaker{
-    
-
-    
-}
-
 
 - (BOOL)setupIOUnit
 {
+    
+    if (self.audioIOUnit) {
+        [self stop];
+    }
+    
     @try
     {
+        
+        DLog(@"setting up io unit : %f", [AVAudioSession sharedInstance].sampleRate);
         /*---------------------------------------------------------------------*
          * Set up a remote IO unit.
          *--------------------------------------------------------------------*/
@@ -387,11 +427,12 @@ static OSStatus	performRender (void                         *inRefCon,
     
     @catch (NSException *e)
     {
+        NSLog(@"could not setup audio unit");
         return NO;
     }
 }
 
-- (BOOL)setupAudioChainForPort:(AVAudioSessionPortOverride)port
+- (BOOL)setupAudioChain
 {
     BOOL ok;
     
@@ -400,10 +441,7 @@ static OSStatus	performRender (void                         *inRefCon,
      *  - set our AVAudioSession configuration
      *  - create a remote I/O unit and register an I/O callback
      *--------------------------------------------------------------------*/
-    ok = [self setupAudioSessionForPort:port];
-    if (!ok) return NO;
-    
-    ok = [self setupIOUnit];
+    ok = [self setupAudioSession];
     if (!ok) return NO;
     
     return YES;
@@ -471,21 +509,6 @@ static OSStatus	performRender (void                         *inRefCon,
 #pragma mark - Getters and setters
 ////////////////////////////////////////////////////////////////////////////////
 
-
-- (void)setPreferredOutputPort:(AVAudioSessionPortOverride)port {
-    
-    self.preferredPort = port;
-    
-    self.audioChainIsBeingReconstructed = YES;
-    
-    usleep(25000);
-    
-    [self setupAudioChainForPort:self.preferredPort];
-    [self start];
-    
-    self.audioChainIsBeingReconstructed = NO;
-    
-}
 
 - (double)sampleRate
 {

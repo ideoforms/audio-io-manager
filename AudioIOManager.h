@@ -60,8 +60,9 @@ typedef void (*audio_volume_change_callback_t)(float volume);
 - (void)audioCallback:(AudioBufferList *)bufferList
             numFrames:(UInt32)numFrames;
 
-- (void) portChangeStarted;
-- (void) portChangeFinished;
+- (void) audioIOPortChanged;
+- (void) audioIOPortChangeStarted;
+- (void) audioIOPortChangeFinished;
 
 @end
 
@@ -92,14 +93,6 @@ typedef void (*audio_volume_change_callback_t)(float volume);
  * @param delegate Delegate object, observing the AudioIODelegate protocol.
  *----------------------------------------------------------------------------*/
 - (id)          initWithDelegate:(id <AudioIODelegate>)delegate;
-
-/**
- *  Set the preferred output port (loudspeaker)
- *
- *  @param port
- *
- */
-- (void) setPreferredOutputPort:(AVAudioSessionPortOverride) port;
 
 /**-----------------------------------------------------------------------------
  * Set volume change callback.
