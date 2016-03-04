@@ -198,27 +198,6 @@ static OSStatus	performRender (void                         *inRefCon,
 
 }
 
-- (void)reset:(NSNotification *)notification
-{
-    
-    if (self.delegate && [self.delegate respondsToSelector:@selector(audioIOPortChangeStarted)]) {
-        [self.delegate audioIOPortChangeStarted];
-    }
-    
-    self.audioChainIsBeingReconstructed = YES;
-    
-    usleep(25000);
-    
-    [self setupAudioChain];
-    [self start];
-    
-    self.audioChainIsBeingReconstructed = NO;
-    
-    if (self.delegate && [self.delegate respondsToSelector:@selector(audioIOPortChangeFinished)]) {
-        [self.delegate audioIOPortChangeFinished];
-    }
-}
-
 
 ////////////////////////////////////////////////////////////////////////////////
 #pragma mark - Audio setup
@@ -411,17 +390,13 @@ static OSStatus	performRender (void                         *inRefCon,
 
 - (BOOL)setupAudioChain
 {
-    BOOL ok;
-    
     /*---------------------------------------------------------------------*
      * Initialise our audio chain:
      *  - set our AVAudioSession configuration
      *  - create a remote I/O unit and register an I/O callback
      *--------------------------------------------------------------------*/
-    ok = [self setupAudioSession];
-    if (!ok) return NO;
-    
-    return YES;
+    return [self setupAudioSession];
+
 }
 
 - (void)dealloc
