@@ -102,12 +102,8 @@ static OSStatus	performRender (void                         *inRefCon,
     self = [super init];
     if (!self) return nil;
 
-    self.delegate = nil;
     self.callback = callback;
-    
-    self.volumeBlock = nil;
-    self.preferredPort = AVAudioSessionPortOverrideSpeaker;
-    self.isInitialised = [self setupAudioChain];
+    [self reset:nil];
 
     return self;
 
@@ -117,20 +113,22 @@ static OSStatus	performRender (void                         *inRefCon,
 {
     self = [super init];
     if (!self) return nil;
-    
     self.delegate = delegate;
-    self.callback = nil;
-    
-    self.volumeBlock = nil;
-    self.preferredPort = AVAudioSessionPortOverrideSpeaker;
-    self.isInitialised = [self setupAudioChain];
-    
+    [self reset:nil];
+
     return self;
 }
 
 - (id)init
 {
     return [self initWithCallback:NULL];
+}
+
+- (void) reset:(id)sender {
+    
+    self.volumeBlock = nil;
+    self.preferredPort = AVAudioSessionPortOverrideSpeaker;
+    self.isInitialised = [self setupAudioChain];
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -184,11 +182,11 @@ static OSStatus	performRender (void                         *inRefCon,
         reasonValue == AVAudioSessionRouteChangeReasonOldDeviceUnavailable ||
         reasonValue == AVAudioSessionRouteChangeReasonOverride)
     {
+        [self setupIOUnit];
+        
         if (self.delegate && [self.delegate respondsToSelector:@selector(audioIOPortChanged)]) {
             [self.delegate audioIOPortChanged];
         }
-        [self setupIOUnit];
-        [self start];
     }
     
     if ([port.portType isEqualToString:AVAudioSessionPortBuiltInReceiver]) {
@@ -395,8 +393,10 @@ static OSStatus	performRender (void                         *inRefCon,
      *  - set our AVAudioSession configuration
      *  - create a remote I/O unit and register an I/O callback
      *--------------------------------------------------------------------*/
-    return [self setupAudioSession];
+    [self setupAudioSession];
+    [self setupIOUnit];
 
+    return YES;
 }
 
 - (void)dealloc

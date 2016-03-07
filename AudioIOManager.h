@@ -61,8 +61,6 @@ typedef void (*audio_volume_change_callback_t)(float volume);
             numFrames:(UInt32)numFrames;
 
 - (void) audioIOPortChanged;
-- (void) audioIOPortChangeStarted;
-- (void) audioIOPortChangeFinished;
 
 @end
 
