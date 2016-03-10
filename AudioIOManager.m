@@ -393,8 +393,13 @@ static OSStatus	performRender (void                         *inRefCon,
      *  - set our AVAudioSession configuration
      *  - create a remote I/O unit and register an I/O callback
      *--------------------------------------------------------------------*/
-    [self setupAudioSession];
-    [self setupIOUnit];
+    BOOL ok = YES;
+    
+    ok = [self setupAudioSession];
+    if (!ok) return NO;
+    
+    ok = [self setupIOUnit];
+    if (!ok) return NO;
 
     return YES;
 }
