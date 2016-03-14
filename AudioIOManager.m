@@ -128,7 +128,10 @@ static OSStatus	performRender (void                         *inRefCon,
     
     self.volumeBlock = nil;
     self.preferredPort = AVAudioSessionPortOverrideSpeaker;
-    self.isInitialised = [self setupAudioChain];
+    if ([self teardownAudioChain]) {
+        self.isInitialised = [self setupAudioChain];
+    };
+    
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -404,8 +407,30 @@ static OSStatus	performRender (void                         *inRefCon,
     return YES;
 }
 
-- (void)dealloc
+
+- (BOOL) teardownAudioChain
 {
+    /*---------------------------------------------------------------------*
+     * Tear down our audio chain:
+     *  - remove our AVAudioSession configuration
+     *  - delete a remote I/O unit and register an I/O callback
+     *--------------------------------------------------------------------*/
+    BOOL ok = YES;
+    
+    ok = [self teardownAudioSession];
+    if (!ok) return NO;
+    
+    ok = [self teardownIOUnit];
+    if (!ok) return NO;
+    
+    return YES;
+}
+
+- (BOOL) teardownAudioSession
+{
+    NSError *error;
+    [[AVAudioSession sharedInstance] setActive:NO error:&error];
+    
     /*---------------------------------------------------------------------*
      * Be a good citizen, remove any dangling observers when we depart.
      *--------------------------------------------------------------------*/
@@ -414,6 +439,26 @@ static OSStatus	performRender (void                         *inRefCon,
     
     AVAudioSession *sessionInstance = [AVAudioSession sharedInstance];
     [sessionInstance removeObserver:self forKeyPath:@"outputVolume"];
+    
+    return !error;
+}
+
+- (BOOL) teardownIOUnit
+{
+    
+    [self stop];
+    /*---------------------------------------------------------------------*
+     * Uninitialize the AURemoteIO instance
+     *--------------------------------------------------------------------*/
+    XThrowIfError(AudioUnitUninitialize(self.audioIOUnit),
+                  @"couldn't uninitialize AURemoteIO instance");
+    
+    return YES;
+}
+
+- (void)dealloc
+{
+    [self teardownAudioChain];
 }
 
 ////////////////////////////////////////////////////////////////////////////////
