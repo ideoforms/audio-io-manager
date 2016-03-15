@@ -128,9 +128,8 @@ static OSStatus	performRender (void                         *inRefCon,
     
     self.volumeBlock = nil;
     self.preferredPort = AVAudioSessionPortOverrideSpeaker;
-    if ([self teardownAudioChain]) {
-        self.isInitialised = [self setupAudioChain];
-    };
+    [self teardownAudioChain];
+    self.isInitialised = [self setupAudioChain];
     
 }
 
@@ -323,7 +322,6 @@ static OSStatus	performRender (void                         *inRefCon,
         AudioComponent comp = AudioComponentFindNext(NULL, &desc);
         XThrowIfError(AudioComponentInstanceNew(comp, &_audioIOUnit), @"couldn't create a new instance of AURemoteIO");
         
-        
         /*---------------------------------------------------------------------*
          * Enable audio input (on input scope of input element)
          * and output (on output scope of output element).
@@ -419,11 +417,11 @@ static OSStatus	performRender (void                         *inRefCon,
     
     ok = [self teardownAudioSession];
     if (!ok) return NO;
-    
+
     ok = [self teardownIOUnit];
     if (!ok) return NO;
-    
-    return YES;
+
+    return ok;
 }
 
 - (BOOL) teardownAudioSession
@@ -434,11 +432,15 @@ static OSStatus	performRender (void                         *inRefCon,
     /*---------------------------------------------------------------------*
      * Be a good citizen, remove any dangling observers when we depart.
      *--------------------------------------------------------------------*/
-    NSNotificationCenter *notificationCenter = [NSNotificationCenter defaultCenter];
-    [notificationCenter removeObserver:self];
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
     
-    AVAudioSession *sessionInstance = [AVAudioSession sharedInstance];
-    [sessionInstance removeObserver:self forKeyPath:@"outputVolume"];
+    @try {
+        [[AVAudioSession sharedInstance] removeObserver:self forKeyPath:@"outputVolume"];
+    }
+    @catch (NSException *exception) {
+        // self not obsering AVAudioSession sharedInstance
+    }
+    
     
     return !error;
 }
@@ -446,14 +448,19 @@ static OSStatus	performRender (void                         *inRefCon,
 - (BOOL) teardownIOUnit
 {
     
-    [self stop];
+    BOOL stopped = [self stop];
     /*---------------------------------------------------------------------*
      * Uninitialize the AURemoteIO instance
      *--------------------------------------------------------------------*/
-    XThrowIfError(AudioUnitUninitialize(self.audioIOUnit),
-                  @"couldn't uninitialize AURemoteIO instance");
+    @try {
+        XThrowIfError(AudioUnitUninitialize(self.audioIOUnit),
+                      @"couldn't uninitialize AURemoteIO instance");
+    }
+    @catch (NSException *exception) {
+        // couldn't uninitialize uninitialized AURemoteIO instance
+    }
     
-    return YES;
+    return stopped;
 }
 
 - (void)dealloc
