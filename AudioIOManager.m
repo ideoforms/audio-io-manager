@@ -438,7 +438,7 @@ static OSStatus	performRender (void                         *inRefCon,
         [[AVAudioSession sharedInstance] removeObserver:self forKeyPath:@"outputVolume"];
     }
     @catch (NSException *exception) {
-        // self not obsering AVAudioSession sharedInstance
+        // self not observing AVAudioSession sharedInstance
     }
     
     
