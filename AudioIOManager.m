@@ -124,7 +124,7 @@ static OSStatus	performRender (void                         *inRefCon,
     return [self initWithCallback:NULL];
 }
 
-- (void) reset:(id)sender {
+- (void) reset:(NSNotification *) notification {
     
     self.volumeBlock = nil;
     self.preferredPort = AVAudioSessionPortOverrideSpeaker;
