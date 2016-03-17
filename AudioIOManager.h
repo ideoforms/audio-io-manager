@@ -11,7 +11,7 @@
  *
  *  Example usage:
  *
- *  static int pos = 0;
+ *  static int phase = 0;
  *
  *  void audio_callback(float **samples, int num_channels, int num_frames)
  *  {
@@ -19,7 +19,7 @@
  *    {
  *      for (int i = 0; i < num_frames; i++)
  *      {
- *         samples[c][i] = sin(M_PI * 2.0 * 440.0 * pos++ / 44100.0);
+ *         samples[c][i] = sin(M_PI * 2.0 * 440.0 * phase++ / 44100.0);
  *      }
  *    }
  *  }
@@ -27,7 +27,11 @@
  *  AudioIOManager *manager = [[AudioIOManager alloc] initWithCallback:audio_callback];
  *  [manager start];
  *
- *  Copyright (c) Daniel Jones 2015-2016 <http://www.erase.net/>
+ *  AUTHORS
+ *  
+ *  Daniel Jones <http://www.erase.net/>
+ *  James Nesfield <http://jamesnesfield.com/>
+ *
  *  Provided under the MIT License. <https://opensource.org/licenses/MIT>
  *
  *----------------------------------------------------------------------------*/
@@ -53,7 +57,9 @@ typedef void (*audio_volume_change_callback_t)(float volume);
  * Protocol for delegates to follow.
  *----------------------------------------------------------------------------*/
 @protocol AudioIODelegate<NSObject>
+
 @optional
+
 /**-----------------------------------------------------------------------------
  * Called when a new audio buffer is available.
  *----------------------------------------------------------------------------*/
