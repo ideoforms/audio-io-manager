@@ -29,6 +29,10 @@
  *
  *  Copyright (c) Daniel Jones 2015-2016 <http://www.erase.net/>
  *  Provided under the MIT License. <https://opensource.org/licenses/MIT>
+ * 
+ *  AUTHORS
+ *  Daniel Jones <http://www.erase.net/>      
+ *  James Nesfield <http://jamesnesfield.com/>        
  *
  *----------------------------------------------------------------------------*/
 
