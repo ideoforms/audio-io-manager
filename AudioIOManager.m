@@ -319,7 +319,12 @@ static OSStatus	performRender (void                         *inRefCon,
             options |= AVAudioSessionCategoryOptionDefaultToSpeaker;
         }
         
-        success = [sessionInstance setCategory:AVAudioSessionCategoryPlayAndRecord withOptions:options error:&error] && success;
+        /*---------------------------------------------------------------------*
+         * At the moment, we only support the PlayAndRecord category.
+         *--------------------------------------------------------------------*/
+        success = [sessionInstance setCategory:AVAudioSessionCategoryPlayAndRecord
+                                   withOptions:options
+                                         error:&error] && success;
         XThrowIfError((OSStatus)error.code, @"Couldn't set session's audio category");
         
         [sessionInstance.availableModes enumerateObjectsUsingBlock:^(NSString * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
