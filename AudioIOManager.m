@@ -8,6 +8,7 @@
  *----------------------------------------------------------------------------*/
 
 #import "AudioIOManager.h"
+#import <UIKit/UIKit.h>
 
 /*----------------------------------------------------------------------------*
  * Helper macro to check the return values of CoreAudio functions.
@@ -19,9 +20,6 @@
  *----------------------------------------------------------------------------*/
 static float *channel_pointers[32];
 
-
-
-
 ////////////////////////////////////////////////////////////////////////////////
 #pragma mark - Audio I/O callbacks
 ////////////////////////////////////////////////////////////////////////////////
@@ -32,11 +30,11 @@ static float *channel_pointers[32];
 struct CallbackData
 {
     AudioUnit               audioIOUnit;
-    BOOL*                   audioChainIsBeingReconstructed;
+    BOOL*                   isBeingReconstructed;
     audio_data_callback_t   callback;
+    int                     samplerate;
     __unsafe_unretained id  delegate;
 } cd;
-
 
 /*----------------------------------------------------------------------------*
  * Universal render function.
@@ -54,7 +52,7 @@ static OSStatus	performRender (void                         *inRefCon,
 {
     OSStatus err = noErr;
     
-    if (*cd.audioChainIsBeingReconstructed == NO)
+    if (*cd.isBeingReconstructed == NO)
     {
         err = AudioUnitRender(cd.audioIOUnit, ioActionFlags, inTimeStamp, 1, inNumberFrames, ioData);
         
@@ -62,37 +60,39 @@ static OSStatus	performRender (void                         *inRefCon,
         {
             for (UInt32 c = 0; c < ioData->mNumberBuffers; ++c)
                 channel_pointers[c] = (float *) ioData->mBuffers[c].mData;
-            cd.callback(channel_pointers, ioData->mNumberBuffers, inNumberFrames);
+            cd.callback(channel_pointers, ioData->mNumberBuffers, inNumberFrames, cd.samplerate);
         }
-        else if (cd.delegate)
-        {
-            [cd.delegate audioCallback:ioData numFrames:inNumberFrames];
-        }
+
     }
     
     return err;
 }
 
-
 @interface AudioIOManager ()
 
 /**-----------------------------------------------------------------------------
- * Pointer to the C function called when samples have been read.
+ * Pointer to C callback functions.
  *----------------------------------------------------------------------------*/
-@property (assign) audio_data_callback_t callback;
 @property (assign) audio_volume_change_callback_t volumeBlock;
-@property (assign) AVAudioSessionPortOverride preferredPort;
+@property (assign) audio_data_callback_t callback;
 
+/**-----------------------------------------------------------------------------
+ * AudioUnit object for input and output.
+ *----------------------------------------------------------------------------*/
 @property (nonatomic, assign) AudioUnit audioIOUnit;
-@property (nonatomic, assign) BOOL audioChainIsBeingReconstructed;
 
+/**-----------------------------------------------------------------------------
+ * Used internally to track whether we're rebuilding our audio chain.
+ *----------------------------------------------------------------------------*/
+@property (nonatomic, assign) BOOL isBeingReconstructed;
 
+/**-----------------------------------------------------------------------------
+ * Used internally to track whether the AVAudioSession has been activated.
+ *----------------------------------------------------------------------------*/
+@property (nonatomic, assign) BOOL isAudioSessionActive;
 @end
 
 @implementation AudioIOManager
-
-
-
 ////////////////////////////////////////////////////////////////////////////////
 #pragma mark - Creation/deletion
 ////////////////////////////////////////////////////////////////////////////////
@@ -102,8 +102,8 @@ static OSStatus	performRender (void                         *inRefCon,
     self = [super init];
     if (!self) return nil;
 
+    [self resetProperties];
     self.callback = callback;
-    [self reset:nil];
 
     return self;
 
@@ -113,8 +113,9 @@ static OSStatus	performRender (void                         *inRefCon,
 {
     self = [super init];
     if (!self) return nil;
+    
+    [self resetProperties];
     self.delegate = delegate;
-    [self reset:nil];
 
     return self;
 }
@@ -124,14 +125,31 @@ static OSStatus	performRender (void                         *inRefCon,
     return [self initWithCallback:NULL];
 }
 
-- (void) reset:(NSNotification *) notification {
+- (void)resetProperties
+{
+    self.mixWithOtherAudio = NO;
+    self.routeToSpeaker = NO;
     
     self.volumeBlock = nil;
-    self.preferredPort = AVAudioSessionPortOverrideSpeaker;
-    [self teardownAudioChain];
-    self.isInitialised = [self setupAudioChain];
+    self.delegate = nil;
+    self.callback = nil;
     
+    self.isInitialised = NO;
+    self.isStarted = NO;
+    self.isAudioSessionActive = NO;
 }
+
+- (void)resetAudio
+{
+    if (self.isInitialised)
+    {
+        [self teardown];
+    }
+    
+    [self setup];
+    NSAssert(self.isInitialised, @"Initialised OK");
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 #pragma mark - Audio I/O callbacks
@@ -141,29 +159,57 @@ static OSStatus	performRender (void                         *inRefCon,
  * Called when audio I/O is interrupted
  *----------------------------------------------------------------------------*/
 
-- (void)handleInterruption:(NSNotification *)notification
+- (void)handleMediaServicesReset:(NSNotification *)notification
 {
-    @try
+    DLog(@"Media services reset.");
+}
+
+- (void)handleApplicationBecameActive:(NSNotification *)notification
+{
+    BOOL ok = [self activateAudioSession];
+    
+    if (ok)
     {
-        UInt8 interruptionType = [[notification.userInfo valueForKey:AVAudioSessionInterruptionTypeKey] intValue];
-        
-        if (interruptionType == AVAudioSessionInterruptionTypeBegan)
+        [self setupIOUnit];
+    
+        if (self.isStarted)
         {
-            [self stop];
-        }
-        
-        if (interruptionType == AVAudioSessionInterruptionTypeEnded)
-        {
-            // make sure to activate the session
-            NSError *error = nil;
-            [[AVAudioSession sharedInstance] setActive:YES error:&error];
-            
             [self start];
         }
     }
-    @catch (NSException *e)
+}
+
+- (void)handleInterruption:(NSNotification *)notification
+{
+    if ([notification.name isEqualToString:AVAudioSessionInterruptionNotification])
     {
-        NSLog(@"Error: %@", e);
+        if ([[notification.userInfo valueForKey:AVAudioSessionInterruptionTypeKey] isEqualToNumber:@(AVAudioSessionInterruptionTypeBegan)])
+        {
+            DLog(@"AVAudioSessionInterruptionTypeBegan");
+            /*----------------------------------------------------------------------------*
+             * Interruption started. Stop our audio unit and deactivate the session.
+             * We can then safely activate and restart when the service resumes.
+             * However, InterruptionTypeEnded is often not called, so this is handled
+             * in handleApplicationBecameActive.
+             *----------------------------------------------------------------------------*/
+            [self teardownIOUnit];
+            [self deactivateAudioSession];
+        }
+        else
+        {
+            DLog(@"AVAudioSessionInterruptionTypeEnded");
+            
+            if (!self.isAudioSessionActive)
+            {
+                [self activateAudioSession];
+                [self setupIOUnit];
+                
+                if (self.isStarted)
+                {
+                    [self start];
+                }
+            }
+        }
     }
 }
 
@@ -173,29 +219,63 @@ static OSStatus	performRender (void                         *inRefCon,
 
 - (void)handleRouteChange:(NSNotification *)notification
 {
-    UInt8 reasonValue = [[notification.userInfo valueForKey:AVAudioSessionRouteChangeReasonKey] intValue];
-    
-    //TODO : is it safe to assume firstObject here?
-    AVAudioSessionPortDescription *port = [AVAudioSession sharedInstance].currentRoute.outputs.firstObject;
 
-    DLog(@"%@ Sample Rate:%0.0fHz I/O Buffer Duration:%f \n%@", port.portType, [AVAudioSession sharedInstance].sampleRate, [AVAudioSession sharedInstance].IOBufferDuration, notification.userInfo[AVAudioSessionRouteChangeReasonKey]);
+    UInt8 reasonValue = [notification.userInfo[AVAudioSessionRouteChangeReasonKey] intValue];
+    
+#ifdef DEBUG
+    AVAudioSessionPortDescription *port = [AVAudioSession sharedInstance].currentRoute.outputs.firstObject;
+    DLog(@"Route changed, port type %@, new samplerate %.0fHz (reason: %d)\n",
+          port.portType, [AVAudioSession sharedInstance].sampleRate,
+          reasonValue);
+#endif
     
     if (reasonValue == AVAudioSessionRouteChangeReasonNewDeviceAvailable ||
         reasonValue == AVAudioSessionRouteChangeReasonOldDeviceUnavailable ||
         reasonValue == AVAudioSessionRouteChangeReasonOverride)
-    {
-        [self setupIOUnit];
-        
-        if (self.delegate && [self.delegate respondsToSelector:@selector(audioIOPortChanged)]) {
-            [self.delegate audioIOPortChanged];
-        }
-    }
-    
-    if ([port.portType isEqualToString:AVAudioSessionPortBuiltInReceiver]) {
-        [[AVAudioSession sharedInstance] overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:nil];
-    }
-    
-
+     {
+         /*----------------------------------------------------------------------------*
+          * This situation occurs when a route is changed by hardware
+          * (AVAudioSessionRouteChangeReasonNewDeviceAvailable occurs when
+          * headphones plugged in, AVAudioSessionRouteChangeReasonOldDeviceUnavailable
+          * when unplugged) or app-switching.
+          *----------------------------------------------------------------------------*/
+         if (self.isAudioSessionActive)
+         {
+             DLog(@"Audio changed device, rebuilding audio chain");
+             [self teardown];
+             [self setup];
+             
+             if (self.delegate && [self.delegate respondsToSelector:@selector(audioIOPortChanged)])
+             {
+                 /*----------------------------------------------------------------------------*
+                  * If specified, trigger a delegate notification that the IO port has been
+                  * changed. The audio I/O unit has been stopped by this point so it's safe to
+                  * reallocate memory that may affect the audio I/O thread. Must do this
+                  * before restarting processing.
+                  *----------------------------------------------------------------------------*/
+                 [self.delegate audioIOPortChanged];
+             }
+             
+             if (self.isStarted)
+             {
+				 /*----------------------------------------------------------------------------*
+				  * The isStarted flag indicates that the audio session had been started
+				  * before this rebuild. Trigger the start method to resume playback.
+				  *----------------------------------------------------------------------------*/
+                 [self start];
+             }
+         }
+         else
+         {
+             /*----------------------------------------------------------------------------*
+              * Hardware may change when we don't have an active audio session
+              * (for example, during a call or other interruption).
+              *
+              * If this happens, don't try to rebuild the audio chain.
+              *----------------------------------------------------------------------------*/
+             DLog(@"Audio changed device when inactive, not rebuilding");
+         }
+     }
 }
 
 
@@ -205,41 +285,57 @@ static OSStatus	performRender (void                         *inRefCon,
 
 - (BOOL)setupAudioSession
 {
+    NSAssert(!self.isInitialised, @"Audio session already initialised");
+    
     @try
     {
-        NSError *error = nil;
+        __block BOOL success = NO;
+        __block NSError *error = nil;
 
         /*---------------------------------------------------------------------*
          * Configure the audio session
          *--------------------------------------------------------------------*/
         AVAudioSession *sessionInstance = [AVAudioSession sharedInstance];
-
         
-        AVAudioSessionPortDescription *port = [AVAudioSession sharedInstance].currentRoute.outputs.firstObject;
-        
-        
-        if ([port.portType isEqualToString:AVAudioSessionPortBuiltInReceiver]) {
-            [[AVAudioSession sharedInstance] overrideOutputAudioPort:AVAudioSessionPortOverrideSpeaker error:nil];
-        }
         
         /*---------------------------------------------------------------------*
          * Set preferred sample rate.
          *--------------------------------------------------------------------*/
-        [sessionInstance setPreferredSampleRate:44100 error:&error];
+        success = [sessionInstance setPreferredSampleRate:AUDIO_PREFERRED_SAMPLE_RATE error:&error];
         XThrowIfError((OSStatus)error.code, @"Couldn't set session's preferred sample rate");
 
-        
         /*---------------------------------------------------------------------*
          * Register for audio input and output.
          *--------------------------------------------------------------------*/
-        [sessionInstance setCategory:AVAudioSessionCategoryPlayAndRecord error:&error];
+        NSUInteger options = 0;
+        
+        if (self.mixWithOtherAudio)
+        {
+            options |= AVAudioSessionCategoryOptionMixWithOthers;
+        }
+        
+        if (self.routeToSpeaker)
+        {
+            options |= AVAudioSessionCategoryOptionDefaultToSpeaker;
+        }
+        
+        success = [sessionInstance setCategory:AVAudioSessionCategoryPlayAndRecord withOptions:options error:&error] && success;
         XThrowIfError((OSStatus)error.code, @"Couldn't set session's audio category");
+        
+        [sessionInstance.availableModes enumerateObjectsUsingBlock:^(NSString * _Nonnull obj, NSUInteger idx, BOOL * _Nonnull stop) {
+            
+            if ([obj isEqual:AUDIO_PREFERRED_SESSION_MODE]) {
+                success =  [sessionInstance setMode:AUDIO_PREFERRED_SESSION_MODE error:&error] && success;
+                XThrowIfError((OSStatus)error.code, @"Couldn't set session's audio mode");
+            }
+
+        }];
 
         /*---------------------------------------------------------------------*
          * Set up a low-latency buffer.
          *--------------------------------------------------------------------*/
         NSTimeInterval bufferDuration = (float) AUDIO_BUFFER_SIZE / sessionInstance.sampleRate;
-        [sessionInstance setPreferredIOBufferDuration:bufferDuration error:&error];
+        success = [sessionInstance setPreferredIOBufferDuration:bufferDuration error:&error] && success;
         XThrowIfError((OSStatus)error.code, @"Couldn't set session's I/O buffer duration");
         
         /*---------------------------------------------------------------------*
@@ -266,12 +362,29 @@ static OSStatus	performRender (void                         *inRefCon,
                                  object:sessionInstance];
 
         /*---------------------------------------------------------------------*
-         * If media services are reset, we need to rebuild our audio chain.
+         * When media services are reset, we need to rebuild our audio chain.
          *--------------------------------------------------------------------*/
         [notificationCenter addObserver:self
-                               selector:@selector(reset:)
+                               selector:@selector(handleMediaServicesReset:)
                                    name:AVAudioSessionMediaServicesWereResetNotification
                                  object:sessionInstance];
+        
+        /*---------------------------------------------------------------------*
+         * When the app becomes active, we need to rebuild our audio chain.
+         *--------------------------------------------------------------------*/
+        [notificationCenter addObserver:self
+                               selector:@selector(handleApplicationBecameActive:)
+                                   name:UIApplicationDidBecomeActiveNotification
+                                 object:nil];
+        
+        /*---------------------------------------------------------------------*
+         * When the app is foregrounded, we need to rebuild our audio chain.
+         * This may happen when the Control Center is closed.
+         *--------------------------------------------------------------------*/
+        [notificationCenter addObserver:self
+                               selector:@selector(handleMediaServicesReset:)
+                                   name:UIApplicationWillEnterForegroundNotification
+                                 object:nil];
 
         /*---------------------------------------------------------------------*
          * Receive notification when system volume changed (via KVO)
@@ -281,34 +394,29 @@ static OSStatus	performRender (void                         *inRefCon,
                              options:0
                              context:nil];
         
-        /*---------------------------------------------------------------------*
-         * Activate the audio session.
-         *--------------------------------------------------------------------*/
-        [sessionInstance setActive:YES error:&error];
-        XThrowIfError((OSStatus) error.code, @"Couldn't set session active");
-        
-        return YES;
+        return success;
+
     }
-    
     @catch (NSException *e)
     {
-        NSLog(@"Error returned from setupAudioSession: %@", e);
+        DLog(@"Error returned from setupAudioSession: %@", e);
         return NO;
     }
 }
 
 
+
 - (BOOL)setupIOUnit
 {
-    
-    if (self.audioIOUnit) {
-        [self stop];
+    if (self.audioIOUnit)
+    {
+        return YES;
     }
     
     @try
     {
+        //DLog(@"Setting up audio unit, samplerate %fHz", [AVAudioSession sharedInstance].sampleRate);
         
-        DLog(@"setting up io unit : %f", [AVAudioSession sharedInstance].sampleRate);
         /*---------------------------------------------------------------------*
          * Set up a remote IO unit.
          *--------------------------------------------------------------------*/
@@ -320,7 +428,7 @@ static OSStatus	performRender (void                         *inRefCon,
         desc.componentFlagsMask = 0;
         
         AudioComponent comp = AudioComponentFindNext(NULL, &desc);
-        XThrowIfError(AudioComponentInstanceNew(comp, &_audioIOUnit), @"couldn't create a new instance of AURemoteIO");
+        XThrowIfError(AudioComponentInstanceNew(comp, &_audioIOUnit), @"Couldn't create a new instance of AURemoteIO");
         
         /*---------------------------------------------------------------------*
          * Enable audio input (on input scope of input element)
@@ -347,9 +455,9 @@ static OSStatus	performRender (void                         *inRefCon,
         audioFormat.mBytesPerPacket     = audioFormat.mBytesPerFrame * audioFormat.mFramesPerPacket;
 
         XThrowIfError(AudioUnitSetProperty(self.audioIOUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 1, &audioFormat, sizeof(audioFormat)),
-                      @"couldn't set the input client format on AURemoteIO");
+                      @"Couldn't set the input client format on AURemoteIO");
         XThrowIfError(AudioUnitSetProperty(self.audioIOUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &audioFormat, sizeof(audioFormat)),
-                      @"couldn't set the output client format on AURemoteIO");
+                      @"Couldn't set the output client format on AURemoteIO");
 
         /*---------------------------------------------------------------------*
          * Create our callback data structure.
@@ -357,9 +465,10 @@ static OSStatus	performRender (void                         *inRefCon,
          * interface.
          *--------------------------------------------------------------------*/
         cd.audioIOUnit = self.audioIOUnit;
-        cd.audioChainIsBeingReconstructed = &_audioChainIsBeingReconstructed;
+        cd.isBeingReconstructed = &_isBeingReconstructed;
         cd.callback = self.callback;
         cd.delegate = self.delegate;
+        cd.samplerate = [AVAudioSession sharedInstance].sampleRate;
         
         /*---------------------------------------------------------------------*
          * Set the render callback on AURemoteIO
@@ -369,25 +478,25 @@ static OSStatus	performRender (void                         *inRefCon,
         renderCallback.inputProcRefCon = NULL;
         
         XThrowIfError(AudioUnitSetProperty(self.audioIOUnit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &renderCallback, sizeof(renderCallback)),
-                      @"couldn't set render callback on AURemoteIO");
+                      @"Couldn't set render callback on AURemoteIO");
         
         /*---------------------------------------------------------------------*
          * Initialize the AURemoteIO instance
          *--------------------------------------------------------------------*/
         XThrowIfError(AudioUnitInitialize(self.audioIOUnit),
-                      @"couldn't initialize AURemoteIO instance");
+                      @"Couldn't initialize AURemoteIO instance");
         
         return YES;
     }
     
     @catch (NSException *e)
     {
-        NSLog(@"could not setup audio unit");
+        DLog(@"Failed initializing audio unit: %@", e);
         return NO;
     }
 }
 
-- (BOOL)setupAudioChain
+- (BOOL)setup
 {
     /*---------------------------------------------------------------------*
      * Initialise our audio chain:
@@ -396,76 +505,250 @@ static OSStatus	performRender (void                         *inRefCon,
      *--------------------------------------------------------------------*/
     BOOL ok = YES;
     
+    self.isBeingReconstructed = YES;
+    
     ok = [self setupAudioSession];
     if (!ok) return NO;
     
+    [self activateAudioSession];
+    
     ok = [self setupIOUnit];
     if (!ok) return NO;
+    
+    self.isBeingReconstructed = NO;
+    self.isInitialised = YES;
 
     return YES;
 }
 
+- (BOOL)activateAudioSession
+{
+    /*---------------------------------------------------------------------*
+     * Activate the audio session.
+     *--------------------------------------------------------------------*/
+    
+    NSError *error;
+    AVAudioSession *sessionInstance = [AVAudioSession sharedInstance];
+    [sessionInstance setActive:YES error:&error];
+    if (error)
+    {
+        DLog(@"Couldn't set session active: %@", error);
+        return NO;
+    }
+    else
+    {
+        self.isAudioSessionActive = YES;
+        return YES;
+    }
+}
 
-- (BOOL) teardownAudioChain
+- (BOOL)deactivateAudioSession
+{
+    
+    BOOL ok;
+    
+    NSError *error;
+    @try
+    {
+        [[AVAudioSession sharedInstance] setActive:NO error:&error];
+        if (error)
+        {
+            ok = NO;
+        }
+        else
+        {
+            ok = YES;
+        }
+    }
+    @catch (NSException *exception)
+    {
+        ok = NO;
+    }
+
+    if (ok)
+    {
+        self.isAudioSessionActive = NO;
+        return YES;
+    }
+    else
+    {
+        DLog(@"Couldn't set session active (%@)", error);
+        return NO;
+    }
+}
+
+- (BOOL) teardown
 {
     /*---------------------------------------------------------------------*
      * Tear down our audio chain:
-     *  - remove our AVAudioSession configuration
-     *  - delete a remote I/O unit and register an I/O callback
+     *  - uninitialize and delete the remote I/O unit
+     *  - deactivate the audio session
+     *  - reset our AVAudioSession configuration and observers
+     * Don't modify our `isStarted` state as this be an interim measure
+     * before rebuilding the chain and resuming playback.
      *--------------------------------------------------------------------*/
     BOOL ok = YES;
+    
+    self.isBeingReconstructed = YES;
+
+    ok = [self teardownIOUnit];
+    if (!ok) return NO;
+    
+    [self deactivateAudioSession];
     
     ok = [self teardownAudioSession];
     if (!ok) return NO;
 
-    ok = [self teardownIOUnit];
-    if (!ok) return NO;
+    self.isBeingReconstructed = NO;
+    self.isInitialised = NO;
 
     return ok;
 }
 
 - (BOOL) teardownAudioSession
 {
-    NSError *error;
-    [[AVAudioSession sharedInstance] setActive:NO error:&error];
-    
     /*---------------------------------------------------------------------*
      * Be a good citizen, remove any dangling observers when we depart.
      *--------------------------------------------------------------------*/
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     
-    @try {
+    @try
+    {
         [[AVAudioSession sharedInstance] removeObserver:self forKeyPath:@"outputVolume"];
     }
-    @catch (NSException *exception) {
-        // self not observing AVAudioSession sharedInstance
+    @catch (NSException *exception)
+    {
+        /*---------------------------------------------------------------------*
+         * Not observing AVAudioSession sharedInstance
+         *--------------------------------------------------------------------*/
     }
     
-    
-    return !error;
+    return YES;
 }
 
 - (BOOL) teardownIOUnit
 {
+    BOOL success = YES;
     
-    BOOL stopped = [self stop];
     /*---------------------------------------------------------------------*
-     * Uninitialize the AURemoteIO instance
+     * Uninitialize the AURemoteIO instance and zero its memory.
      *--------------------------------------------------------------------*/
-    @try {
-        XThrowIfError(AudioUnitUninitialize(self.audioIOUnit),
-                      @"couldn't uninitialize AURemoteIO instance");
-    }
-    @catch (NSException *exception) {
-        // couldn't uninitialize uninitialized AURemoteIO instance
+    if (self.audioIOUnit)
+    {
+        @try
+        {
+            /*---------------------------------------------------------------------*
+             * In case the audio unit is still playing, stop it (ignoring
+             * any error result). "All I/O must be stopped or paused prior to
+             * deactivating the audio session."
+             *--------------------------------------------------------------------*/
+            AudioOutputUnitStop(self.audioIOUnit);
+            
+            XThrowIfError(AudioUnitUninitialize(self.audioIOUnit),
+                          @"Couldn't uninitialize AudioUnit instance");
+            self.audioIOUnit = NULL;
+        }
+        @catch (NSException *exception)
+        {
+            /*---------------------------------------------------------------------*
+             * Couldn't uninitialize AURemoteIO instance
+             *--------------------------------------------------------------------*/
+            DLog(@"Failed to stop audio unit: %@", exception);
+            success = NO;
+        }
     }
     
-    return stopped;
+    return success;
+}
+
+
+- (BOOL) selectInputOrientation:(NSString *)orientation polarPattern:(NSString *) pattern
+{
+    
+    if (!self.isAudioSessionActive)
+    {
+        NSLog(@"Audio session should have session category and mode set, and then be activated prior to using any of the input selection features");
+        return NO;
+    }
+    
+    AVAudioSession *sessionInstance = [AVAudioSession sharedInstance];
+    NSError *error;
+    BOOL result = YES;
+    
+    AVAudioSessionPortDescription* micPort = nil;
+    for (AVAudioSessionPortDescription* port in [sessionInstance availableInputs])
+    {
+        if ([port.portType isEqualToString:AVAudioSessionPortBuiltInMic])
+        {
+            micPort = port;
+            break;
+        }
+    }
+    
+    /*-------------------------------------------------------------------------*
+     * Loop over the built-in mic's data sources and attempt to locate the
+     * bottom mic first, or front microphone.
+     *
+     * DOES NOT WORK ON THE SIMULATOR.
+     *------------------------------------------------------------------------*/
+    AVAudioSessionDataSourceDescription* dataSource = nil;
+    for (AVAudioSessionDataSourceDescription* source in micPort.dataSources)
+    {
+        if ([source.orientation isEqual:orientation])
+        {
+            dataSource = source;
+            break;
+        }
+        
+    }
+    
+    
+    if (dataSource)
+    {
+        /*-------------------------------------------------------------------------*
+         * Note that the direction of a polar pattern is relative to the
+         * orientation of the data source. For example, you can use the cardioid
+         * pattern with a back-facing data source to more clearly record sound
+         * from behind the device, or with a front-facing data source to more
+         * clearly record sound from in front of the device (such as the user’s voice).
+         *------------------------------------------------------------------------*/
+        result = [dataSource setPreferredPolarPattern:pattern error:&error];
+        
+        if (!result || error)
+        {
+            NSLog(@"Could not set polar pattern %@", error.description);
+        }
+        
+        result = [micPort setPreferredDataSource:dataSource error:&error] && result;
+        if (!result || error)
+        {
+            NSLog(@"setPreferredDataSource failed (%@)", error.description);
+        }
+        
+    }
+    
+    /*-------------------------------------------------------------------------*
+     * Select a preferred input port for audio routing. If the input port is
+     * already part of the current audio route, this will have no effect.
+     * Otherwise, selecting an input port for routing ___will initiate a route
+     * change___ to use the preferred input port, provided that the 
+     * application's session controls audio routing.
+     *------------------------------------------------------------------------*/
+    result = [sessionInstance setPreferredInput:micPort error:&error] && result;
+    
+    if (!result || error)
+    {
+        NSLog(@"setPreferredInput failed : %@", error);
+    }
+    
+    DLog(@"Mic set : %@ %@", sessionInstance.inputDataSource.orientation, sessionInstance.inputDataSource.selectedPolarPattern);
+
+    return result && !error;
 }
 
 - (void)dealloc
 {
-    [self teardownAudioChain];
+    [self teardown];
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -492,32 +775,53 @@ static OSStatus	performRender (void                         *inRefCon,
 
 - (OSStatus)start
 {
+    if (!self.isInitialised)
+    {
+        [self setup];
+    }
+    
     /*---------------------------------------------------------------------*
-     * Kick off processing.
+     * Start audio processing.
      *--------------------------------------------------------------------*/
     OSStatus err = AudioOutputUnitStart(self.audioIOUnit);
     if (err)
-        NSLog(@"Couldn't start audio I/O: %d", (int) err);
+    {
+        DLog(@"Couldn't start audio I/O: %d", (int) err);
+        return err;
+    }
+    
+    self.isStarted = YES;
     
     return err;
 }
 
 - (OSStatus)stop
 {
+    if (!self.isInitialised)
+    {
+        DLog(@"Attempting to stop audio IO when it is not started.");
+        return 1;
+    }
+    
     /*---------------------------------------------------------------------*
-     * Terminate processing.
+     * Terminate audio processing.
      *--------------------------------------------------------------------*/
     OSStatus err = AudioOutputUnitStop(self.audioIOUnit);
+    
     if (err)
-        NSLog(@"Couldn't stop audio I/O: %d", (int) err);
+    {
+        DLog(@"Couldn't stop audio I/O: %d", (int) err);
+        return err;
+    }
+    
+    self.isStarted = NO;
+    
     return err;
 }
-
 
 ////////////////////////////////////////////////////////////////////////////////
 #pragma mark - Getters and setters
 ////////////////////////////////////////////////////////////////////////////////
-
 
 - (double)sampleRate
 {
@@ -529,17 +833,10 @@ static OSStatus	performRender (void                         *inRefCon,
 	return [[AVAudioSession sharedInstance] outputVolume];
 }
 
-- (BOOL)audioChainIsBeingReconstructed
-{
-    return _audioChainIsBeingReconstructed;
-}
-
 - (void)setVolumeChangedBlock:(audio_volume_change_callback_t)block
 {
     self.volumeBlock = block;
 }
-
-
 
 @end
 
